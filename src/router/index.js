@@ -1,28 +1,22 @@
+// src/router/index.js
 import Vue from 'vue'
-import VueRouter from 'vue-router'
-import HomeView from '../views/HomeView.vue'
+import Router from 'vue-router'
+import Home from '../views/Home.vue' // 示例
 
-Vue.use(VueRouter)
+Vue.use(Router)
 
 const routes = [
   {
     path: '/',
-    name: 'home',
-    component: HomeView
-  },
-  {
-    path: '/about',
-    name: 'about',
-    // route level code-splitting
-    // this generates a separate chunk (about.[hash].js) for this route
-    // which is lazy-loaded when the route is visited.
-    component: () => import(/* webpackChunkName: "about" */ '../views/AboutView.vue')
+    name: 'UserHome',
+    component: Home
   }
 ]
 
-const router = new VueRouter({
+const router = new Router({
   mode: 'history',
-  base: process.env.BASE_URL,
+  // 若在 qiankun 环境下，设置 base 为 /user
+  base: window.__POWERED_BY_QIANKUN__ ? '/user' : '/',
   routes
 })
 
