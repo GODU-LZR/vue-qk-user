@@ -1,37 +1,32 @@
 <template>
   <div class="user-edit-page">
-    <!-- 1. 美化后的标题 -->
     <div class="page-title-container">
       <i class="el-icon-edit page-title-icon"></i>
       <h2 class="page-title">编辑用户信息</h2>
     </div>
 
-    <!-- 2. 使用 el-card 包装表单 -->
     <el-card shadow="hover" class="edit-card" v-loading="loading">
-      <!-- 加载失败或用户不存在提示 -->
-      <div v-if="!userFound && !loading" class="not-found-tip">
+
+      <div v-if="!loading && !userFound" class="not-found-tip">
         <i class="el-icon-warning-outline"></i>
-        <p>用户不存在或加载失败。</p>
+        <p v-if="userId">在缓存中未找到 ID 为 {{ userId }} 的用户数据。</p>
+        <p v-else>无效的用户 ID。</p>
         <el-button type="text" @click="goBack">返回用户列表</el-button>
       </div>
 
-      <!-- 用户编辑表单 -->
-      <el-form v-else :model="userForm" :rules="rules" ref="userForm" label-width="100px" class="user-form">
+      <el-form v-if="!loading && userFound" :model="userForm" :rules="rules" ref="userForm" label-width="100px" class="user-form">
         <el-row :gutter="20">
-          <!-- 左侧：头像和基础信息 -->
           <el-col :xs="24" :sm="10" :md="8" class="avatar-section">
             <el-form-item label="" prop="avatar" label-width="0">
               <div class="avatar-display-area">
-                <!-- 使用 computed property 'displayAvatar' -->
-                <el-avatar :size="120" :src="displayAvatar" class="form-avatar">
-                  <!-- Fallback if displayAvatar is also empty/fails -->
+                <el-avatar :size="120" :key="avatarKey" :src="displayAvatarWithCacheBust" class="form-avatar">
                   <i class="el-icon-user-solid"></i>
                 </el-avatar>
                 <el-upload
                     class="avatar-uploader"
                     action="#"
                     :show-file-list="false"
-                    :http-request="handleFakeUpload"
+                    :http-request="handleHttpRequest"
                     :before-upload="beforeAvatarUpload"
                     title="点击上传新头像"
                 >
@@ -46,44 +41,45 @@
               </el-input>
             </el-form-item>
             <el-form-item label="当前状态" class="readonly-item">
-              <el-tag :type="getStatusTagType(userForm.status)" size="medium" effect="light">
-                <i :class="statusIconClass(userForm.status)" style="margin-right: 4px;"></i>
-                {{ formatStatus(userForm.status) }}
-              </el-tag>
-              <div v-if="userForm.banEndTime" class="ban-time-tip">
-                (至 {{ formatDateTime(userForm.banEndTime) }})
+              <el-select v-model="userForm.status" placeholder="请选择状态" style="width: 100%;">
+                <el-option
+                    v-for="item in statusOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value">
+                  <el-tag :type="getStatusTagType(item.value)" size="small" effect="light" style="margin-right: 5px;">
+                    <i :class="statusIconClass(item.value)"></i>
+                  </el-tag>
+                  <span>{{ item.label }}</span>
+                </el-option>
+              </el-select>
+              <div v-if="userForm.banEndTime && userForm.status !== 0" class="ban-time-tip"> (至 {{ formatDateTime(userForm.banEndTime) }})
               </div>
             </el-form-item>
           </el-col>
 
-          <!-- 右侧：其他可编辑信息 -->
           <el-col :xs="24" :sm="14" :md="16">
             <el-form-item label="用户名" prop="username">
               <el-input v-model="userForm.username" placeholder="用于登录系统" clearable>
                 <i slot="prefix" class="el-input__icon el-icon-user"></i>
               </el-input>
             </el-form-item>
-
             <el-form-item label="真实姓名" prop="realName">
               <el-input v-model="userForm.realName" placeholder="用户的真实姓名" clearable>
                 <i slot="prefix" class="el-input__icon el-icon-s-custom"></i>
               </el-input>
             </el-form-item>
-
             <el-form-item label="邮箱" prop="email">
               <el-input v-model="userForm.email" placeholder="用于接收通知、找回密码等" clearable>
                 <i slot="prefix" class="el-input__icon el-icon-message"></i>
               </el-input>
             </el-form-item>
-
             <el-divider content-position="left">修改密码 (可选)</el-divider>
-
             <el-form-item label="新密码" prop="password">
               <el-input type="password" v-model="userForm.password" show-password placeholder="留空则不修改密码" clearable>
                 <i slot="prefix" class="el-input__icon el-icon-lock"></i>
               </el-input>
             </el-form-item>
-
             <el-form-item label="确认密码" prop="confirmPassword" v-if="userForm.password">
               <el-input type="password" v-model="userForm.confirmPassword" show-password placeholder="再次输入新密码" clearable>
                 <i slot="prefix" class="el-input__icon el-icon-check"></i>
@@ -92,7 +88,6 @@
           </el-col>
         </el-row>
 
-        <!-- 表单操作按钮 -->
         <el-form-item class="form-actions">
           <el-button type="primary" icon="el-icon-check" @click="submitForm('userForm')" :loading="submitting">
             保存修改
@@ -110,54 +105,34 @@
 </template>
 
 <script>
-// 辅助函数：生成基于用户名的头像 URL (使用 DiceBear initials)
-function generateAvatar(seed) {
-  if (!seed) {
-    // 如果种子无效，返回一个默认或null
-    return 'https://api.dicebear.com/7.x/initials/svg?seed=Default&size=120'; // 或返回 null
-  }
-  const size = 120; // 头像尺寸
-  // 对 seed 进行编码，以防包含特殊字符
-  const encodedSeed = encodeURIComponent(seed);
-  return `https://api.dicebear.com/7.x/initials/svg?seed=${encodedSeed}&size=${size}&backgroundColor=409eff,67c23a,e6a23c,f56c6c&backgroundType=gradientLinear&radius=50`;
-}
+// --- 导入 Vuex 辅助函数 ---
+import { mapGetters, mapMutations } from 'vuex';
+// --- 导入默认头像占位符 ---
+import defaultAvatarPlaceholder from '@/assets/default-avatar.png';
+// --- 导入 API 函数 ---
+import { getUserAvatarUploadUrl, getFinalImageUrl } from '@/api/upload-file/index.js';
+import { updateAdminUserProfile } from '@/api/admin/index.js';
+// --- 导入 axios ---
+import axios from 'axios';
 
 export default {
   name: 'UserEditPage',
   data() {
-    // --- 密码验证逻辑 (保持不变) ---
+    // --- 密码验证逻辑 ---
     const validatePass = (rule, value, callback) => {
-      if (value && value.length < 6) {
-        callback(new Error('新密码长度不能少于 6 位'));
-      } else {
-        if (this.userForm.confirmPassword || (this.userForm.password && this.$refs.userForm)) {
-          // 如果确认密码有值，或者新密码有值且表单已渲染，触发确认密码的校验
-          this.$nextTick(() => { // 确保DOM更新后再校验
-            if (this.$refs.userForm && this.userForm.password) {
-              this.$refs.userForm.validateField('confirmPassword');
-            }
-          });
-        }
-        callback();
-      }
+      if (value && value.length < 6) { callback(new Error('新密码长度不能少于 6 位')); } else { if (this.userForm.password && this.$refs.userForm) { this.$nextTick(() => { this.$refs.userForm.validateField('confirmPassword'); }); } callback(); }
     };
     const validatePass2 = (rule, value, callback) => {
-      if (this.userForm.password && !value) {
-        callback(new Error('请再次输入新密码'));
-      } else if (value !== this.userForm.password) {
-        callback(new Error('两次输入的新密码不一致!'));
-      } else {
-        callback();
-      }
+      if (this.userForm.password) { if (!value) { callback(new Error('请再次输入新密码')); } else if (value !== this.userForm.password) { callback(new Error('两次输入的新密码不一致!')); } else { callback(); } } else { callback(); }
     };
 
     return {
-      loading: false,
+      loading: true,
       submitting: false,
       userFound: false,
       userId: null,
-      originalUserForm: {}, // 保存初始加载的数据
-      userForm: { // 表单绑定对象
+      originalUserForm: {},
+      userForm: {
         id: null,
         userCode: '',
         username: '',
@@ -165,12 +140,17 @@ export default {
         email: '',
         password: '',
         confirmPassword: '',
-        avatar: null, // 存储实际的头像URL（上传的或后端返回的）
-        avatarFile: null, // 存储待上传的文件对象
+        avatar: null,
         status: 0,
         banEndTime: null,
       },
-      rules: { // 验证规则
+      statusOptions: [
+        { value: 0, label: '正常' },
+        { value: 1, label: '封禁15天' },
+        { value: 2, label: '封禁30天' },
+        { value: 3, label: '永久封禁' },
+      ],
+      rules: {
         username: [
           { required: true, message: '请输入用户名', trigger: 'blur' },
           { min: 3, max: 20, message: '长度在 3 到 20 个字符', trigger: 'blur' }
@@ -182,207 +162,272 @@ export default {
           { required: true, message: '请输入邮箱地址', trigger: 'blur' },
           { type: 'email', message: '请输入正确的邮箱地址', trigger: ['blur', 'change'] }
         ],
+        status: [
+          { required: true, message: '请选择用户状态', trigger: 'change' }
+        ],
         password: [
           { validator: validatePass, trigger: 'blur' }
         ],
         confirmPassword: [
-          // 确认密码的验证依赖于新密码，使用 validator
           { validator: validatePass2, trigger: 'blur' }
         ]
-        // avatar 字段通常不需要表单验证规则，由 beforeUpload 控制
       }
     };
   },
   computed: {
-    // --- 计算属性：用于显示头像 ---
-    displayAvatar() {
-      // 如果 userForm.avatar 有值 (表示已上传或从后端获取)，则使用它
-      if (this.userForm.avatar) {
-        return this.userForm.avatar;
+    ...mapGetters(['getUserById']),
+    avatarKey() {
+      return `${this.userId}-${this.userForm.avatar || 'default'}`;
+    },
+    displayAvatarWithCacheBust() {
+      const baseUrl = this.userForm.avatar;
+      if (baseUrl && typeof baseUrl === 'string' && baseUrl.startsWith('http')) {
+        try {
+          const url = new URL(baseUrl);
+          url.searchParams.set('_t', Date.now());
+          return url.toString();
+        } catch (e) {
+          console.warn("[displayAvatar computed] Could not parse URL for cache busting, returning original:", baseUrl, e);
+          return baseUrl;
+        }
+      } else if (baseUrl && typeof baseUrl === 'string' && baseUrl.startsWith('data:')) {
+        return baseUrl;
       }
-      // 否则，根据用户名生成头像
-      // 确保在 userForm.username 加载后再生成
-      if (this.userForm.username) {
-        return generateAvatar(this.userForm.username);
-      }
-      // 如果连用户名都没有，返回 null 或默认占位符
-      return null; // 或者返回一个通用的占位符 URL
+      return defaultAvatarPlaceholder;
     }
   },
   created() {
     this.userId = this.$route.params.id;
+    console.log(`[UserEditPage created] Route parameter id: ${this.userId}`);
     if (this.userId) {
-      this.fetchUserData(this.userId);
+      this.loadUserFromVuex(this.userId);
     } else {
-      this.$message.error('无效的用户ID');
-      this.goBack();
+      console.error('[UserEditPage created] Invalid User ID from route.');
+      this.$message.error('无效的用户 ID');
+      this.loading = false;
+      this.userFound = false;
     }
   },
   methods: {
-    fetchUserData(id) {
+    ...mapMutations(['SET_USERS']),
+    loadUserFromVuex(id) {
       this.loading = true;
-      console.log(`模拟根据 ID: ${id} 获取用户数据`);
-      // --- 模拟 API 请求 ---
+      this.userFound = false;
+      console.log(`[UserEditPage loadUserFromVuex] Attempting to load user ${id} from Vuex store...`);
+      const cachedUser = this.getUserById(id);
       setTimeout(() => {
-        // 模拟从后端获取的数据
-        const fetchedData = {
-          id: parseInt(id),
-          userCode: `USR${String(id).padStart(4, '0')}`,
-          username: `user_${id}`,
-          realName: `用户 ${id}`,
-          email: `user${id}@example.com`,
-          // 模拟后端可能返回 null 或有效的 avatar URL
-          avatar: id % 3 === 0 ? `https://cube.elemecdn.com/${id % 9}/7c/3ea6beec64369c2642b92c6726f1epng.png` : null,
-          status: id % 4,
-          banEndTime: id % 4 === 1 ? '2024-06-15T12:00:00Z' : (id % 4 === 2 ? '2024-06-30T18:00:00Z' : null),
-        };
-
-        if (fetchedData) {
-          // 填充表单，注意 avatar 可能为 null
-          this.userForm = {
-            ...this.userForm, // 保留 password, confirmPassword, avatarFile
-            id: fetchedData.id,
-            userCode: fetchedData.userCode,
-            username: fetchedData.username,
-            realName: fetchedData.realName,
-            email: fetchedData.email,
-            avatar: fetchedData.avatar, // 直接使用后端返回的 avatar 值
-            status: fetchedData.status,
-            banEndTime: fetchedData.banEndTime,
-          };
-          // 保存原始数据用于重置
-          this.originalUserForm = JSON.parse(JSON.stringify(this.userForm));
+        if (cachedUser) {
+          console.log(`[UserEditPage loadUserFromVuex] User ${id} found in Vuex store.`, cachedUser);
+          this.populateForm(cachedUser);
           this.userFound = true;
         } else {
-          this.userFound = false;
-          this.$message.error('未能加载用户信息');
+          console.warn(`[UserEditPage loadUserFromVuex] User ${id} not found in Vuex store.`);
+          this.$message.warning(`在缓存中未找到用户 ${id} 的数据，请确保已从列表页进入。`);
         }
         this.loading = false;
-      }, 500);
+        console.log(`[UserEditPage loadUserFromVuex] Loading finished. User found: ${this.userFound}`);
+      }, 100);
+    },
+    populateForm(userData) {
+      // 增加对 userData 结构的检查
+      if (!userData || typeof userData !== 'object' || userData.id === undefined) {
+        console.error('[UserEditPage populateForm] Invalid userData received:', userData);
+        this.$message.error('加载用户信息失败，数据格式错误。');
+        this.userFound = false;
+        return;
+      }
+      console.log('[UserEditPage populateForm] Populating form with valid data:', userData);
+      this.userForm = {
+        id: userData.id,
+        userCode: userData.userCode || '',
+        username: userData.username || '',
+        realName: userData.realName || '',
+        email: userData.email || '',
+        avatar: userData.avatar || null,
+        status: userData.status !== undefined ? userData.status : 0,
+        banEndTime: userData.banEndTime || null,
+        password: '',
+        confirmPassword: '',
+      };
+      try {
+        this.originalUserForm = structuredClone(this.userForm);
+      } catch (e) {
+        console.warn("structuredClone not supported, falling back to JSON methods for deep copy.");
+        this.originalUserForm = JSON.parse(JSON.stringify(this.userForm));
+      }
+      console.log('[UserEditPage populateForm] Form populated:', this.userForm);
+      console.log('[UserEditPage populateForm] Original form data backed up:', this.originalUserForm);
+      this.$nextTick(() => {
+        if (this.$refs.userForm) {
+          this.$refs.userForm.clearValidate();
+        }
+      });
     },
 
+    // --- 头像上传处理 ---
+    async handleHttpRequest(options) {
+      const file = options.file;
+      console.log('[UserEditPage handleHttpRequest] Starting upload process for file:', file.name);
+      this.$message.info('正在处理头像...');
+      let uploadUrl = '';
+      let fileRecordID = '';
+      let finalImageUrl = '';
+      try {
+        console.log(`[UserEditPage handleHttpRequest] Step 1: Getting pre-signed URL for user ID: ${this.userId}...`);
+        const uploadInfoResponse = await getUserAvatarUploadUrl(this.userId);
+
+        // 假设拦截器返回的是 { url, fileRecordID } 或 包含 code 的 Result 对象
+        let uploadData = null;
+        // *** 修改：优先检查拦截器是否直接返回了 data ***
+        if (uploadInfoResponse && uploadInfoResponse.url && uploadInfoResponse.fileRecordID) {
+          uploadData = uploadInfoResponse;
+        } else if (uploadInfoResponse && uploadInfoResponse.code === 200 && uploadInfoResponse.data) {
+          uploadData = uploadInfoResponse.data;
+        }
+
+        if (uploadData && uploadData.url && uploadData.fileRecordID) {
+          uploadUrl = uploadData.url;
+          fileRecordID = uploadData.fileRecordID;
+          console.log(`[UserEditPage handleHttpRequest] Got pre-signed URL and fileRecordID: ${fileRecordID}`);
+        } else {
+          const errorMsg = uploadInfoResponse?.message || '获取上传地址失败，返回数据格式不正确。';
+          console.error("获取上传地址失败:", uploadInfoResponse);
+          throw new Error(errorMsg);
+        }
+
+        console.log(`[UserEditPage handleHttpRequest] Step 2: Uploading file to pre-signed URL...`);
+        await axios.put(uploadUrl, file, { headers: { 'Content-Type': file.type } });
+        console.log('[UserEditPage handleHttpRequest] File uploaded successfully via PUT.');
+
+        console.log(`[UserEditPage handleHttpRequest] Step 3: Getting final image URL with fileRecordID: ${fileRecordID}...`);
+        // *** 修改：假设 getFinalImageUrl 返回的是字符串 URL (拦截器处理后) ***
+        finalImageUrl = await getFinalImageUrl(fileRecordID);
+        console.log('[UserEditPage handleHttpRequest] Got final image URL:', finalImageUrl);
+
+        this.userForm.avatar = finalImageUrl;
+        this.$message.success('头像上传成功！请记得点击“保存修改”。');
+
+        this.$nextTick(() => {
+          this.$forceUpdate();
+          console.log('[UserEditPage handleHttpRequest] $forceUpdate called after avatar update.');
+        });
+
+      } catch (error) {
+        console.error('[UserEditPage handleHttpRequest] Upload process failed:', error);
+        const errorMsg = error?.response?.data?.message || error?.message || '头像处理失败，请重试';
+        this.$message.error(errorMsg);
+      }
+    },
+    beforeAvatarUpload(file) {
+      const isJPG = file.type === 'image/jpeg';
+      const isPNG = file.type === 'image/png';
+      const isLt2M = file.size / 1024 / 1024 < 2;
+      if (!isJPG && !isPNG) { this.$message.error('上传头像图片只能是 JPG 或 PNG 格式!'); }
+      if (!isLt2M) { this.$message.error('上传头像图片大小不能超过 2MB!'); }
+      return (isJPG || isPNG) && isLt2M;
+    },
+
+    // --- 表单提交逻辑 (对接后端 PATCH 接口) ---
     submitForm(formName) {
-      this.$refs[formName].validate((valid) => {
+      this.$refs[formName].validate(async (valid) => {
         if (valid) {
           this.submitting = true;
-          console.log('编辑表单验证通过，准备提交:', this.userForm);
-
-          // --- 准备提交的数据 ---
-          // 实际项目中，你可能需要创建一个新的对象，只包含需要提交的字段
-          // 特别是密码，只有在 this.userForm.password 非空时才提交
-          const formDataToSubmit = new FormData(); // 使用 FormData 处理文件上传
-          formDataToSubmit.append('id', this.userForm.id);
-          formDataToSubmit.append('username', this.userForm.username);
-          formDataToSubmit.append('realName', this.userForm.realName);
-          formDataToSubmit.append('email', this.userForm.email);
-
-          // 只有在新密码输入时才提交
+          console.log('[UserEditPage submitForm] 表单验证通过，准备提交...');
+          const updateDataMap = {};
+          const fieldsToCompare = ['username', 'realName', 'email', 'avatar', 'status'];
+          fieldsToCompare.forEach(field => {
+            const currentValue = this.userForm[field];
+            const originalValue = this.originalUserForm[field];
+            const currentAvatarIsEmpty = currentValue === null || currentValue === '';
+            const originalAvatarIsEmpty = originalValue === null || originalValue === '';
+            if (field === 'avatar') {
+              if (currentAvatarIsEmpty !== originalAvatarIsEmpty || (!currentAvatarIsEmpty && currentValue !== originalValue)) {
+                updateDataMap[field] = currentValue;
+              }
+            } else if (currentValue !== originalValue) {
+              updateDataMap[field] = currentValue;
+            }
+          });
           if (this.userForm.password) {
-            formDataToSubmit.append('password', this.userForm.password);
+            updateDataMap.password = this.userForm.password;
           }
-
-          // 如果有新上传的头像文件，则添加
-          if (this.userForm.avatarFile) {
-            formDataToSubmit.append('avatarFile', this.userForm.avatarFile, this.userForm.avatarFile.name);
-          } else {
-            // 如果没有新文件，但用户可能清除了头像，需要告知后端
-            // (这里简单处理，如果 avatar 为 null 且没有新文件，后端可能需要特殊处理)
-            // 或者，你可以在表单中添加一个隐藏字段或按钮来明确表示“移除头像”
-            // 如果 this.userForm.avatar 本身就是 null，并且没有新文件，可以不传 avatar 相关字段
-            // 如果 this.userForm.avatar 有值但没有新文件，说明保持不变，也不用传文件
-          }
-          // 注意：如果后端API期望JSON，则需要调整数据格式，文件上传通常用 FormData
-
-          console.log('模拟提交的数据 (FormData):', formDataToSubmit); // 无法直接看内容
-          for (let pair of formDataToSubmit.entries()) {
-            console.log(pair[0]+ ': ' + (pair[1] instanceof File ? pair[1].name : pair[1]));
-          }
-
-
-          // --- 模拟 API 请求 ---
-          setTimeout(() => {
-            this.$message.success('用户信息更新成功！');
+          if (Object.keys(updateDataMap).length === 0) {
+            this.$message.info('用户信息未作任何修改。');
             this.submitting = false;
-            // 更新成功后，重置 avatarFile 并更新原始数据备份
-            this.userForm.avatarFile = null;
-            // 假设后端返回了更新后的用户信息（包括可能的新头像URL），需要重新设置 userForm 和 originalUserForm
-            // 这里简单地将当前表单状态设为新的原始状态
-            this.originalUserForm = JSON.parse(JSON.stringify(this.userForm));
-            // 密码字段应清空
-            this.userForm.password = '';
-            this.userForm.confirmPassword = '';
-            // 重新获取一次数据可能是更好的做法，以同步最新状态
-            // this.fetchUserData(this.userId);
-          }, 1000);
+            return;
+          }
+          console.log('[UserEditPage submitForm] 检测到变化的字段:', updateDataMap);
+          try {
+            // *** 修改：直接使用 API 函数的返回值 (假设拦截器处理了 Result) ***
+            const apiResponse = await updateAdminUserProfile(this.userId, updateDataMap);
 
+            console.log('[UserEditPage submitForm] API success response:', apiResponse);
+
+            // *** 修改：从 apiResponse 中提取实际的用户数据 ***
+            // 检查 apiResponse 是否是有效的用户对象 (包含 id)
+            // 假设拦截器已经处理了 Result, 直接返回了 data 部分 (UserProfileDTO)
+            let updatedUserData = null;
+            if (apiResponse && apiResponse.id) {
+              updatedUserData = apiResponse; // 直接使用
+            }
+            // 如果拦截器没有处理 Result, 需要从 data 字段取
+            else if (apiResponse && apiResponse.code === 200 && apiResponse.data && apiResponse.data.id) {
+              updatedUserData = apiResponse.data;
+              console.log('[UserEditPage submitForm] Extracted user data from response.data');
+            }
+
+
+            if (updatedUserData && updatedUserData.id) {
+              this.$message.success('用户信息更新成功！');
+              // 使用有效的用户对象更新表单和 Vuex
+              this.populateForm(updatedUserData);
+              this.SET_USERS([updatedUserData]); // 更新 Vuex store
+              console.log('[UserEditPage submitForm] Form and Vuex updated successfully.');
+            } else {
+              // 如果无法从响应中解析出有效的用户数据
+              console.error('[UserEditPage submitForm] Update successful, but could not parse valid user profile DTO from API response:', apiResponse);
+              this.$message.error('更新成功，但解析最新数据失败，请稍后手动刷新。');
+              // 可以选择尝试重新从 Vuex 加载，或者不更新本地状态
+              // this.loadUserFromVuex(this.userId);
+            }
+
+          } catch (error) {
+            console.error('[UserEditPage submitForm] Update request failed:', error);
+            const errorMsg = error?.response?.data?.message || error?.message || '更新用户信息失败，请重试。';
+            this.$message.error(errorMsg);
+          } finally {
+            this.submitting = false;
+          }
         } else {
-          console.log('编辑表单验证失败!');
+          console.log('[UserEditPage submitForm] 表单验证失败!');
           this.$message.error('请检查表单填写是否正确');
           return false;
         }
       });
     },
 
+    // --- 表单重置逻辑 ---
     resetForm() {
-      // 重置为初始加载的数据
-      // 特别注意：需要保留 id 和 userCode 等不可变字段
-      const id = this.userForm.id;
-      const userCode = this.userForm.userCode;
-      this.userForm = JSON.parse(JSON.stringify(this.originalUserForm));
-      this.userForm.id = id; // 确保 ID 不丢失
-      this.userForm.userCode = userCode; // 确保 Code 不丢失
-      this.userForm.avatarFile = null; // 清除待上传文件
-      // 清除密码字段
-      this.userForm.password = '';
-      this.userForm.confirmPassword = '';
-
-      // 清除验证状态
-      this.$nextTick(() => {
-        this.$refs.userForm.clearValidate();
-      });
-      this.$message.info('表单已重置为上次保存的状态');
+      if (this.originalUserForm && this.originalUserForm.id) {
+        console.log('[UserEditPage resetForm] Resetting form to:', this.originalUserForm);
+        this.populateForm(this.originalUserForm); // 调用 populateForm 来重置
+        this.$nextTick(() => { if (this.$refs.userForm) { this.$refs.userForm.clearValidate(); } });
+        this.$message.info('表单已重置为加载时的状态');
+      } else {
+        console.warn('[UserEditPage resetForm] Cannot reset, originalUserForm is invalid.');
+        this.$message.warning('无法重置表单，缺少原始数据。');
+      }
     },
 
+    // --- 返回列表页 ---
     goBack() {
-      // 可以考虑检查是否有未保存的更改
-      // if (JSON.stringify(this.userForm) !== JSON.stringify(this.originalUserForm)) { ... }
-      this.$router.push('/admin/users'); // 返回列表页
+      this.$router.push('/admin/users');
     },
 
-    // --- 头像上传处理 ---
-    handleFakeUpload(options) {
-      const file = options.file;
-      // 使用 FileReader 在前端预览
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        // 更新 avatar 以立即显示预览
-        this.userForm.avatar = e.target.result; // 这是 DataURL
-      };
-      reader.readAsDataURL(file);
-      // 保存文件对象，用于提交
-      this.userForm.avatarFile = file;
-      console.log('New avatar selected:', file.name);
-      this.$message.success('头像已选择，保存后生效');
-    },
-
-    beforeAvatarUpload(file) {
-      const isJPG = file.type === 'image/jpeg';
-      const isPNG = file.type === 'image/png';
-      const isLt2M = file.size / 1024 / 1024 < 2;
-
-      if (!isJPG && !isPNG) {
-        this.$message.error('上传头像图片只能是 JPG 或 PNG 格式!');
-      }
-      if (!isLt2M) {
-        this.$message.error('上传头像图片大小不能超过 2MB!');
-      }
-      return (isJPG || isPNG) && isLt2M;
-    },
-
-    // --- 辅助方法 ---
+    // --- 辅助格式化方法 ---
     formatStatus(status) {
-      const statusMap = { 0: '正常', 1: '临时封禁', 2: '长期封禁', 3: '永久封禁' };
-      return statusMap[status] || '未知状态';
+      const statusOption = this.statusOptions.find(opt => opt.value === status);
+      return statusOption ? statusOption.label : '未知状态';
     },
     getStatusTagType(status) {
       const typeMap = { 0: 'success', 1: 'warning', 2: 'danger', 3: 'info' };
@@ -395,42 +440,19 @@ export default {
     formatDateTime(dateTimeString) {
       if (!dateTimeString) return '-';
       try {
-        // 尝试更健壮的日期解析
         let date = new Date(dateTimeString);
-        // 检查是否包含'T'和'Z'，如果是UTC，直接用 toLocaleString 可能更准确反映本地时间
-        if (dateTimeString.includes('T') && dateTimeString.includes('Z')) {
-          // 如果是标准的 ISO 8601 UTC 格式
-          // return date.toLocaleString(); // 显示本地时间
-          // 或者保持统一格式
-        } else {
-          // 尝试兼容 'YYYY-MM-DD HH:MM:SS' (可能需要替换空格为T)
-          const fallbackDate = new Date(dateTimeString.replace(' ', 'T'));
-          if (!isNaN(fallbackDate.getTime())) {
-            date = fallbackDate;
-          }
-        }
-
-        if (isNaN(date.getTime())) { // 检查日期是否有效
-          console.warn("Could not parse date:", dateTimeString);
-          return dateTimeString; // 无法解析，返回原始字符串
-        }
-
-        // 格式化输出 'YYYY-MM-DD HH:MM'
-        return date.getFullYear() + '-' +
-            ('0' + (date.getMonth() + 1)).slice(-2) + '-' +
-            ('0' + date.getDate()).slice(-2) + ' ' +
-            ('0' + date.getHours()).slice(-2) + ':' +
-            ('0' + date.getMinutes()).slice(-2);
-      } catch (e) {
-        console.error("Error formatting date:", dateTimeString, e);
-        return dateTimeString; // 出错时返回原始字符串
-      }
+        if (dateTimeString.includes('T') && dateTimeString.includes('Z')) { /* ... */ }
+        else { const fallbackDate = new Date(dateTimeString.replace(' ', 'T')); if (!isNaN(fallbackDate.getTime())) { date = fallbackDate; } }
+        if (isNaN(date.getTime())) { console.warn("无法解析日期:", dateTimeString); return dateTimeString; }
+        return date.getFullYear() + '-' + ('0' + (date.getMonth() + 1)).slice(-2) + '-' + ('0' + date.getDate()).slice(-2) + ' ' + ('0' + date.getHours()).slice(-2) + ':' + ('0' + date.getMinutes()).slice(-2);
+      } catch (e) { console.error("格式化日期时出错:", dateTimeString, e); return dateTimeString; }
     }
   }
 }
 </script>
 
 <style scoped>
+/* 样式部分保持不变 */
 .user-edit-page {
   padding: 25px;
   background-color: #f8f9fa; /* 淡灰色背景 */
@@ -592,5 +614,4 @@ export default {
 .form-actions .el-button + .el-button {
   margin-left: 15px; /* 按钮间距 */
 }
-
 </style>

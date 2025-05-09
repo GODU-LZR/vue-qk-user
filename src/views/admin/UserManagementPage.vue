@@ -1,24 +1,17 @@
 <template>
   <div class="user-management-page">
-    <!-- 1. 美化后的标题 (已居中) -->
     <div class="page-title-container">
       <i class="el-icon-user-solid page-title-icon"></i>
       <h2 class="page-title">用户列表管理</h2>
     </div>
-
-    <!-- 操作与筛选区域 (无变化) -->
     <el-card shadow="never" class="actions-card">
-      <!-- ... 内容不变 ... -->
       <div class="actions-bar">
-        <!-- 添加用户按钮 -->
         <el-button type="primary" icon="el-icon-plus" @click="handleAddUser" class="action-item">
           添加用户
         </el-button>
-
-        <!-- 搜索框 -->
         <el-input
             v-model="searchQuery"
-            placeholder="搜索编号、姓名或邮箱"
+            placeholder="搜索编号、姓名、邮箱或用户名"
             clearable
             class="action-item search-input"
             @clear="handleSearch(true)"
@@ -26,8 +19,6 @@
         >
           <el-button slot="append" icon="el-icon-search" @click="handleSearch(true)"></el-button>
         </el-input>
-
-        <!-- 2. 封禁状态筛选 -->
         <el-select
             v-model="filterStatus"
             placeholder="按状态筛选"
@@ -43,8 +34,6 @@
               :value="item.value">
           </el-option>
         </el-select>
-
-        <!-- 3. 排序条件筛选 -->
         <el-select
             v-model="sortBy"
             placeholder="排序字段"
@@ -54,12 +43,8 @@
           <el-option label="默认排序" value="default"></el-option>
           <el-option label="按姓名" value="name"></el-option>
           <el-option label="按编号" value="code"></el-option>
-          <!-- <<< 新增：按用户名排序选项 -->
           <el-option label="按用户名" value="username"></el-option>
-          <!-- >>> 新增结束 -->
         </el-select>
-
-        <!-- 排序方向 (保持不变) -->
         <el-select
             v-model="sortOrder"
             placeholder="排序顺序"
@@ -70,11 +55,8 @@
           <el-option label="升序" value="asc"></el-option>
           <el-option label="降序" value="desc"></el-option>
         </el-select>
-
       </div>
     </el-card>
-
-    <!-- 用户卡片列表区域 (容器改为 Grid 布局) -->
     <div
         class="user-cards-container"
         v-infinite-scroll="loadMore"
@@ -83,7 +65,6 @@
         infinite-scroll-distance="10"
         ref="scrollContainer"
     >
-      <!-- transition-group 的 tag 仍然是 div, 但其子元素由 Grid 控制 -->
       <transition-group name="card-fade" tag="div" class="card-list-wrapper">
         <el-card
             v-for="user in users"
@@ -91,7 +72,6 @@
             class="user-card"
             shadow="hover"
         >
-          <!-- Card Header (无变化) -->
           <div slot="header" class="clearfix card-header">
             <el-avatar :size="50" :src="user.avatar || defaultAvatar" icon="el-icon-user-solid" class="card-avatar"></el-avatar>
             <div class="user-info-header">
@@ -102,7 +82,6 @@
               {{ formatStatus(user.status) }}
             </el-tag>
           </div>
-          <!-- Card Body (无变化) -->
           <div class="card-body">
             <p><i class="el-icon-postcard"></i> <strong>编号:</strong> {{ user.userCode }}</p>
             <p><i class="el-icon-message"></i> <strong>邮箱:</strong> {{ user.email }}</p>
@@ -111,7 +90,6 @@
               <i class="el-icon-warning-outline"></i> <strong>封禁至:</strong> {{ formatDateTime(user.banEndTime) }}
             </p>
           </div>
-          <!-- Card Actions (无变化) -->
           <div class="card-actions">
             <el-button size="mini" type="primary" icon="el-icon-edit" @click="handleEditUser(user)">
               编辑
@@ -131,26 +109,24 @@
           </div>
         </el-card>
       </transition-group>
-
-      <!-- 加载提示 (无变化) -->
       <div v-if="loading || loadingMore" class="loading-indicator">
         <i class="el-icon-loading"></i> 加载中...
       </div>
-      <div v-if="noMoreData && users.length > 0" class="no-more-indicator">
+      <div v-if="noMoreData && users.length > 0 && !loading" class="no-more-indicator">
         没有更多用户了
       </div>
       <div v-if="!loading && users.length === 0 && !noMoreData" class="no-data-indicator">
         暂无符合条件的用户数据
       </div>
     </div>
-
   </div>
 </template>
 
 <script>
-// Script 部分保持不变
 import defaultAvatarPlaceholder from '@/assets/default-avatar.png';
-import { generateFakeUsers, TOTAL_USERS_COUNT } from './_fakeUserData';
+import { getNormalUserList } from '@/api/admin/index.js';
+// 引入 mapMutations (如果你想用辅助函数的话，但直接用 this.$store.commit 更直观)
+// import { mapMutations } from 'vuex';
 
 export default {
   name: 'UserManagementPage',
@@ -160,170 +136,172 @@ export default {
       loadingMore: false,
       noMoreData: false,
       searchQuery: '',
-      users: [],
+      users: [], // 本地列表数据，用于页面显示
       defaultAvatar: defaultAvatarPlaceholder,
-      currentPage: 1,
-      pageSize: 12, // 保持12，以适应3列布局
+      currentPage: 0, // 记录当前已加载的页码 (从1开始计数比较好，API通常也是)
+      pageSize: 12,
       totalUsers: 0,
-      allSimulatedUsers: [], // 存储所有模拟数据
-
-      // --- 新增数据属性 ---
-      filterStatus: '', // 筛选状态 (空字符串表示全部)
-      sortBy: 'default', // 排序字段 ('default', 'name', 'code')
-      sortOrder: 'asc', // 排序顺序 ('asc', 'desc')
-
-      // --- 筛选/排序选项 ---
+      filterStatus: '',
+      sortBy: 'default',
+      sortOrder: 'desc',
       statusOptions: [
         { value: 0, label: '正常' },
         { value: 1, label: '封禁15天' },
         { value: 2, label: '封禁30天' },
         { value: 3, label: '永久封禁' },
       ],
-      // sortOptions 和 orderOptions 直接在 template 中定义了
     };
   },
   created() {
-    this.allSimulatedUsers = generateFakeUsers(TOTAL_USERS_COUNT);
-    // 注意：totalUsers 会在 fetchUsers 中根据过滤结果动态更新
-    this.fetchUsers(true);
+    // 首次加载时，请求第 1 页
+    this.fetchUsers(true, 1);
   },
   methods: {
-    // --- 数据获取 (核心修改) ---
-    fetchUsers(isInitialOrSearch = false) {
+    // ...mapMutations(['SET_USERS', 'REMOVE_USER']), // 如果使用 mapMutations
+
+    /**
+     * 获取用户列表数据
+     * @param {boolean} isInitialOrSearch - 是否是首次加载或搜索/筛选/排序触发的加载
+     * @param {number} pageToFetch - 需要请求的页码 (从 1 开始)
+     */
+    fetchUsers(isInitialOrSearch = false, pageToFetch) {
+      // --- 加载状态判断逻辑 ---
       if (isInitialOrSearch) {
+        // 初始加载或搜索/筛选/排序
+        if (this.loading) return; // 防止重复请求
+        console.log(`[fetchUsers] Initial load/search requested for page ${pageToFetch}`);
         this.loading = true;
-        this.currentPage = 1;
-        this.users = [];
-        this.noMoreData = false;
+        this.users = []; // 清空本地列表
+        this.currentPage = 0; // 重置当前页码记录 (因为要从第一页开始)
+        this.noMoreData = false; // 重置“没有更多”状态
+        // 滚动到顶部 (如果容器存在)
         if (this.$refs.scrollContainer) {
           this.$refs.scrollContainer.scrollTop = 0;
         }
       } else {
+        // 加载更多
+        // 如果正在加载、或正在加载更多、或已确定没有更多数据，则不执行
+        if (this.loading || this.loadingMore || this.noMoreData) {
+          console.log(`[fetchUsers] Load more for page ${pageToFetch} skipped: loading=${this.loading}, loadingMore=${this.loadingMore}, noMoreData=${this.noMoreData}`);
+          return;
+        }
+        console.log(`[fetchUsers] Load more requested for page ${pageToFetch}`);
         this.loadingMore = true;
       }
 
-      console.log(`模拟获取用户列表 - 页码: ${this.currentPage}, 搜索: '${this.searchQuery}', 状态: ${this.filterStatus}, 排序: ${this.sortBy} ${this.sortOrder}`);
+      // --- 请求参数 ---
+      const queryParams = {
+        currentPage: pageToFetch, // 使用传入的要请求的页码
+        pageSize: this.pageSize,
+        searchQuery: this.searchQuery,
+        filterStatus: this.filterStatus === '' ? null : this.filterStatus,
+        sortBy: this.sortBy === 'default' ? null : this.sortBy, // 'default' 时传 null 或不传
+        sortOrder: this.sortBy === 'default' ? null : this.sortOrder // 'default' 时传 null 或不传
+      };
 
-      // --- 模拟 API 请求 ---
-      setTimeout(() => {
-        // 1. 从完整列表中开始处理
-        let processedUsers = [...this.allSimulatedUsers];
+      console.log(`[Vue Component] 调用 getNormalUserList - 请求页码: ${pageToFetch}, 参数:`, queryParams);
 
-        // 2. 应用搜索过滤
-        if (this.searchQuery) {
-          const lowerQuery = this.searchQuery.toLowerCase();
-          processedUsers = processedUsers.filter(user =>
-              user.userCode.toLowerCase().includes(lowerQuery) ||
-              user.realName.toLowerCase().includes(lowerQuery) ||
-              user.email.toLowerCase().includes(lowerQuery)
-          );
-        }
+      // --- 调用 API ---
+      getNormalUserList(queryParams)
+          .then(response => {
+            const responseData = response?.data ?? {};
+            const pageData = responseData.records || []; // 用户数据数组
+            const total = responseData.total || 0; // 总记录数
 
-        // 3. 应用状态过滤
-        if (this.filterStatus !== '' && this.filterStatus !== null) { // 确保处理 clearable 的 null 值
-          processedUsers = processedUsers.filter(user => user.status === this.filterStatus);
-        }
+            console.log(`[Vue Component] API 响应成功: 获取到页码 ${pageToFetch} 的 ${pageData.length} 条记录, 总数 ${total}`);
 
-        // 4. 应用排序
-        if (this.sortBy !== 'default') {
-          processedUsers.sort((a, b) => {
-            let comparison = 0;
-            let valA, valB;
-
-            if (this.sortBy === 'name') {
-              valA = a.realName || '';
-              valB = b.realName || '';
-              // 使用 localeCompare 进行中文友好排序
-              comparison = valA.localeCompare(valB, 'zh-CN');
-            } else if (this.sortBy === 'code') {
-              valA = a.userCode || '';
-              valB = b.userCode || '';
-              // 尝试按数字比较，如果失败则按字符串比较
-              const numA = parseInt(valA, 10);
-              const numB = parseInt(valB, 10);
-              if (!isNaN(numA) && !isNaN(numB)) {
-                comparison = numA - numB;
-              } else {
-                comparison = valA.localeCompare(valB); // 字符串比较
+            // --- ⭐ 将获取到的数据存入 Vuex ---
+            if (pageData.length > 0) {
+              try {
+                this.$store.commit('SET_USERS', pageData);
+                console.log(`[Vue Component] 已将 ${pageData.length} 条用户数据提交到 Vuex store。`);
+              } catch (e) {
+                console.error("[Vue Component] 提交用户数据到 Vuex 失败:", e);
+                // 考虑添加用户提示
+                // this.$message.error('缓存用户信息失败');
               }
             }
-            else if (this.sortBy === 'username') {
-              valA = a.username || ''; // 使用 || '' 防止 undefined 或 null
-              valB = b.username || '';
-              // 用户名通常是字母/数字，也可能包含其他字符，localeCompare 同样适用
-              comparison = valA.localeCompare(valB, 'zh-CN'); // 保持中文环境排序一致性
+            // --- ⭐ Vuex 存储结束 ---
+
+            // --- 更新本地列表数据用于显示 ---
+            if (pageData.length > 0) {
+              if (isInitialOrSearch) {
+                this.users = pageData; // 初始加载或搜索，直接替换
+              } else {
+                this.users = this.users.concat(pageData); // 加载更多，追加数据
+              }
+              this.currentPage = pageToFetch; // 更新当前已成功加载的页码
+              console.log(`[fetchUsers SUCCESS] currentPage updated to: ${this.currentPage}`);
             }
 
-            return this.sortOrder === 'desc' ? (comparison * -1) : comparison;
+            // --- 更新总数和“没有更多”状态 ---
+            this.totalUsers = total;
+            // 判断是否没有更多数据：当前列表长度 >= 总数，或者当前请求返回的数据为空
+            this.noMoreData = this.users.length >= this.totalUsers || pageData.length === 0;
+            // 如果是初始加载且第一页就没数据，也标记为 noMoreData
+            if (isInitialOrSearch && pageData.length === 0) {
+              this.noMoreData = true;
+            }
+
+
+            console.log(`[Vue Component] 加载完成: 当前显示 ${this.users.length}, 总数 ${this.totalUsers}, 是否还有更多: ${!this.noMoreData}`);
+
+          })
+          .catch(error => {
+            // --- 错误处理 ---
+            console.error('[Vue Component] 获取用户列表失败:', error);
+            const errorMsg = error?.message || '请稍后重试';
+            this.$message.error(`加载用户列表失败: ${errorMsg}`);
+            // 出错时也认为没有更多数据，防止无限滚动一直尝试
+            this.noMoreData = true;
+          })
+          .finally(() => {
+            // --- 结束加载状态 ---
+            if (isInitialOrSearch) {
+              this.loading = false;
+            } else {
+              this.loadingMore = false;
+            }
+            console.log(`[fetchUsers finally] loading=${this.loading}, loadingMore=${this.loadingMore}, noMoreData=${this.noMoreData}`);
           });
-        }
-        // --- 排序结束 ---
-
-        // 5. 更新符合条件的总数 (用于判断 noMoreData)
-        this.totalUsers = processedUsers.length;
-
-        // 6. 计算分页数据
-        const startIndex = (this.currentPage - 1) * this.pageSize;
-        const endIndex = startIndex + this.pageSize;
-        const pageData = processedUsers.slice(startIndex, endIndex);
-
-        // 7. 追加或替换数据
-        if (isInitialOrSearch) {
-          this.users = pageData;
-        } else {
-          this.users = this.users.concat(pageData);
-        }
-
-        // 8. 更新状态
-        this.currentPage++;
-        // 使用过滤/排序后的总数来判断是否还有更多
-        this.noMoreData = this.users.length >= this.totalUsers;
-
-        // 9. 关闭加载状态
-        if (isInitialOrSearch) {
-          this.loading = false;
-        } else {
-          this.loadingMore = false;
-        }
-
-        console.log(`加载完成: ${pageData.length} 条, 当前显示: ${this.users.length}, 符合条件总数: ${this.totalUsers}, 是否还有更多: ${!this.noMoreData}`);
-
-      }, 500); // 模拟网络延迟
     },
 
-    // --- 无限滚动触发 ---
+    // --- 无限滚动加载更多 ---
     loadMore() {
-      console.log("触发 loadMore");
+      console.log(`触发 loadMore, 当前已加载页: ${this.currentPage}, 是否还有更多: ${!this.noMoreData}, loadingMore: ${this.loadingMore}`);
+      // 只有在非加载中、非加载更多、且还有更多数据时才加载下一页
       if (!this.loading && !this.loadingMore && !this.noMoreData) {
-        this.fetchUsers(false);
+        const nextPage = this.currentPage + 1; // 计算下一页页码
+        console.log(`[loadMore] 准备加载第 ${nextPage} 页`);
+        this.fetchUsers(false, nextPage); // 调用 fetchUsers 加载下一页
+      } else {
+        console.log(`[loadMore] 加载被阻止: loading=${this.loading}, loadingMore=${this.loadingMore}, noMoreData=${this.noMoreData}`);
       }
     },
 
-    // --- 搜索处理 ---
-    handleSearch(isTriggeredByInput = false) {
-      // 搜索总是重置到第一页
-      this.fetchUsers(true);
+    // --- 搜索、筛选、排序处理 ---
+    handleSearch() {
+      // 搜索时，总是从第 1 页开始重新加载
+      this.fetchUsers(true, 1);
     },
-
-    // --- 筛选或排序变化处理 ---
     handleFilterOrSortChange() {
-      // 任何筛选或排序变化都应重置到第一页
-      // 如果排序字段设为'default'，则自动将排序顺序设回'asc'（或禁用）
-      if (this.sortBy === 'default') {
-        this.sortOrder = 'asc';
-      }
-      this.fetchUsers(true);
+      // 筛选或排序改变时，也总是从第 1 页开始重新加载
+      this.fetchUsers(true, 1);
     },
 
-    // --- 导航操作 (保持不变) ---
+    // --- 添加用户导航 ---
     handleAddUser() {
-      this.$router.push('/admin/users/create'); // 假设路径
+      this.$router.push('/admin/users/create');
     },
+    // --- 编辑用户导航 ---
     handleEditUser(user) {
-      this.$router.push(`/admin/users/edit/${user.id}`); // 假设路径
+      // 可以在导航前检查 Vuex 中是否已存在该用户 (可选调试)
+      const userInStore = this.$store.getters.getUserById(user.id);
+      console.log(`[UserManagementPage] Navigating to edit user ${user.id}. Exists in Vuex: ${!!userInStore}`);
+      this.$router.push(`/admin/users/edit/${user.id}`);
     },
 
-    // --- 用户操作 (下拉菜单) (保持不变, 但需要注意更新 allSimulatedUsers 和触发刷新) ---
+    // --- 用户操作指令处理 ---
     handleCommand(command, user) {
       console.log('Command:', command, 'User:', user);
       const actionMap = {
@@ -339,76 +317,49 @@ export default {
       }
     },
 
-    // --- 模拟后端交互 (需要更新本地列表并可能触发刷新) ---
-    // 注意：这些操作现在应该在修改 allSimulatedUsers 后，调用 fetchUsers(true) 来刷新当前视图，以反映过滤和排序
-    updateUserInList(userId, updates) {
-      // 更新 allSimulatedUsers (模拟数据库)
-      const indexInAll = this.allSimulatedUsers.findIndex(u => u.id === userId);
-      if (indexInAll > -1) {
-        Object.assign(this.allSimulatedUsers[indexInAll], updates, {
-          updateTime: new Date().toISOString().split('T')[0] + ' ' + new Date().toTimeString().split(' ')[0]
-        });
-        return true;
-      }
-      return false;
-    },
-
+    // --- 用户操作方法 (模拟 API 调用) ---
     banUser(user, durationDays) {
-      console.log(`模拟封禁用户 ${user.id}，时长: ${durationDays === -1 ? '永久' : durationDays + '天'}`);
-      this.$message({ message: '处理中...', type: 'info', duration: 500 });
+      console.log(`请求封禁用户 ${user.id}，时长: ${durationDays === -1 ? '永久' : durationDays + '天'}`);
+      this.$message({ message: '处理中...', type: 'info', duration: 1000 });
+      // TODO: 调用后端封禁 API
       setTimeout(() => {
-        let status;
-        let banEndTime = null;
-        if (durationDays === 15) status = 1;
-        else if (durationDays === 30) status = 2;
-        else if (durationDays === -1) status = 3;
-        else status = user.status; // 无效时长不改变
-
-        if (durationDays > 0) {
-          const now = new Date();
-          now.setDate(now.getDate() + durationDays);
-          banEndTime = now.toISOString().split('T')[0] + ' ' + now.toTimeString().split(' ')[0];
-        }
-
-        if (this.updateUserInList(user.id, { status, banEndTime })) {
-          this.$message.success('用户封禁操作成功');
-          this.fetchUsers(true); // 重新获取数据以应用排序/过滤
-        } else {
-          this.$message.error('操作失败，未找到用户');
-        }
-      }, 300);
+        this.$message.success('用户封禁操作成功 (模拟)');
+        // 操作成功后刷新列表 (会重新获取并覆盖 Vuex 中的数据)
+        this.fetchUsers(true, 1);
+        // 如果需要立即更新 Vuex 中该用户的状态，可以在这里 commit
+        // const newStatus = durationDays === -1 ? 3 : (durationDays === 30 ? 2 : 1);
+        // const newBanEndTime = ... // 计算封禁结束时间
+        // this.$store.commit('SET_USERS', [{...user, status: newStatus, banEndTime: newBanEndTime}]);
+      }, 500);
     },
-
     unbanUser(user) {
-      console.log(`模拟取消封禁用户 ${user.id}`);
-      this.$message({ message: '处理中...', type: 'info', duration: 500 });
+      console.log(`请求取消封禁用户 ${user.id}`);
+      this.$message({ message: '处理中...', type: 'info', duration: 1000 });
+      // TODO: 调用后端解封 API
       setTimeout(() => {
-        if (this.updateUserInList(user.id, { status: 0, banEndTime: null })) {
-          this.$message.success('用户已取消封禁');
-          this.fetchUsers(true); // 重新获取数据
-        } else {
-          this.$message.error('操作失败，未找到用户');
-        }
-      }, 300);
+        this.$message.success('用户已取消封禁 (模拟)');
+        this.fetchUsers(true, 1);
+        // this.$store.commit('SET_USERS', [{...user, status: 0, banEndTime: null}]);
+      }, 500);
     },
-
     deleteUser(user) {
-      console.log(`模拟删除用户 ${user.id}`);
-      this.$message({ message: '处理中...', type: 'info', duration: 500 });
+      console.log(`请求删除用户 ${user.id}`);
+      this.$message({ message: '处理中...', type: 'info', duration: 1000 });
+      // TODO: 调用后端删除 API
       setTimeout(() => {
-        const indexInAll = this.allSimulatedUsers.findIndex(u => u.id === user.id);
-        if (indexInAll > -1) {
-          this.allSimulatedUsers.splice(indexInAll, 1);
-          // totalUsers 会在 fetchUsers 中重新计算
-          this.$message.success('用户删除成功');
-          this.fetchUsers(true); // 重新获取数据
-        } else {
-          this.$message.error('删除失败，未找到用户');
+        this.$message.success('用户删除成功 (模拟)');
+        // 删除成功后，不仅要刷新列表，最好也从 Vuex 中移除
+        try {
+          this.$store.commit('REMOVE_USER', user.id); // 调用移除 mutation
+          console.log(`[Vue Component] 已从 Vuex store 移除用户 ${user.id}`);
+        } catch(e) {
+          console.error("[Vue Component] 从 Vuex 移除用户失败:", e);
         }
-      }, 300);
+        this.fetchUsers(true, 1); // 刷新列表
+      }, 500);
     },
 
-    // --- 辅助方法 (保持不变) ---
+    // --- 辅助方法 ---
     confirmAction(message, confirmCallback, type = 'warning') {
       this.$confirm(message, '提示', {
         confirmButtonText: '确定',
@@ -422,7 +373,7 @@ export default {
     },
     formatStatus(status) {
       const statusMap = { 0: '正常', 1: '封禁15天', 2: '封禁30天', 3: '永久封禁' };
-      return statusMap[status] || '未知';
+      return statusMap[status] !== undefined ? statusMap[status] : '未知状态';
     },
     getStatusTagType(status) {
       const typeMap = { 0: 'success', 1: 'warning', 2: 'danger', 3: 'info' };
@@ -431,41 +382,25 @@ export default {
     formatDateTime(dateTimeString) {
       if (!dateTimeString) return '-';
       try {
-        // 尝试兼容 'YYYY-MM-DD HH:MM:SS' 格式
-        const parts = dateTimeString.split(' ');
-        const datePart = parts[0];
-        const timePart = parts.length > 1 ? parts[1] : '00:00:00';
-        // 移除可能的毫秒部分，以提高兼容性
-        const cleanTimePart = timePart.split('.')[0];
-        const isoString = `${datePart}T${cleanTimePart}Z`; // 假设是UTC或本地时间，根据实际情况调整
-        let date = new Date(isoString); // 尝试解析
-
-        // 如果直接解析失败，尝试不带 'T' 和 'Z'
+        const parsableString = dateTimeString.includes('T') ? dateTimeString.replace('T', ' ') : dateTimeString;
+        let date = new Date(parsableString);
         if (isNaN(date.getTime())) {
-          const fallbackDate = new Date(dateTimeString.replace(/-/g, '/')); // 尝试替换'-'为'/'提高兼容性
-          if (!isNaN(fallbackDate.getTime())) {
-            date = fallbackDate;
-          } else {
-            // 再尝试直接解析原始字符串
-            const directDate = new Date(dateTimeString);
-            if (!isNaN(directDate.getTime())) {
-              date = directDate;
-            } else {
-              console.warn("Could not parse date:", dateTimeString);
-              return dateTimeString; // 无法解析，返回原始字符串
-            }
+          const fallbackDate = new Date(dateTimeString);
+          if (isNaN(fallbackDate.getTime())) {
+            console.warn("无法解析日期字符串:", dateTimeString);
+            return dateTimeString;
           }
+          date = fallbackDate;
         }
-
-        // 格式化输出
-        return date.getFullYear() + '-' +
-            ('0' + (date.getMonth() + 1)).slice(-2) + '-' +
-            ('0' + date.getDate()).slice(-2) + ' ' +
-            ('0' + date.getHours()).slice(-2) + ':' +
-            ('0' + date.getMinutes()).slice(-2);
+        const year = date.getFullYear();
+        const month = ('0' + (date.getMonth() + 1)).slice(-2);
+        const day = ('0' + date.getDate()).slice(-2);
+        const hours = ('0' + date.getHours()).slice(-2);
+        const minutes = ('0' + date.getMinutes()).slice(-2);
+        return `${year}-${month}-${day} ${hours}:${minutes}`;
       } catch (e) {
-        console.error("Error formatting date:", dateTimeString, e);
-        return dateTimeString; // 出错时返回原始字符串
+        console.error("格式化日期时出错:", dateTimeString, e);
+        return dateTimeString;
       }
     },
   }
@@ -473,233 +408,39 @@ export default {
 </script>
 
 <style scoped>
-.user-management-page {
-  padding: 20px;
-  background-color: #f5f7fa;
-}
-
-/* 1. 页面标题样式 - 添加居中 */
-.page-title-container {
-  display: flex;
-  align-items: center;
-  justify-content: center; /* <<< 新增：水平居中 */
-  margin-bottom: 20px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid #e4e7ed;
-}
-.page-title-icon {
-  font-size: 24px;
-  color: #409EFF;
-  margin-right: 10px;
-}
-.page-title {
-  font-size: 22px;
-  font-weight: 600;
-  color: #303133;
-  margin: 0;
-}
-
-/* 操作栏卡片 */
-.actions-card {
-  margin-bottom: 20px;
-}
-
-/* 操作栏 flex 布局 */
-.actions-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 15px;
-  align-items: center;
-}
-
-.action-item { } /* 无需额外样式 */
-
-/* 特定项宽度调整 */
-.search-input {
-  width: 280px;
-  min-width: 200px;
-}
+/* 样式部分保持不变 */
+.user-management-page { padding: 20px; background-color: #f5f7fa; }
+.page-title-container { display: flex; align-items: center; justify-content: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #e4e7ed; }
+.page-title-icon { font-size: 24px; color: #409EFF; margin-right: 10px; }
+.page-title { font-size: 22px; font-weight: 600; color: #303133; margin: 0; }
+.actions-card { margin-bottom: 20px; }
+.actions-bar { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }
+.search-input { width: 280px; min-width: 200px; }
 .filter-select { width: 150px; }
 .sort-select { width: 130px; }
 .order-select { width: 100px; }
-
-/* 卡片容器 */
-.user-cards-container {
-  padding-bottom: 40px;
-}
-
-/* 卡片列表包装器 - 改为 Grid 布局 */
-.card-list-wrapper {
-  display: grid; /* <<< 修改：使用 Grid 布局 */
-  grid-template-columns: repeat(3, 1fr); /* <<< 新增：默认三列，每列等宽 */
-  gap: 20px; /* 卡片之间的间距 */
-  position: relative; /* 为了 transition-group 的 absolute 定位 */
-}
-
-/* 单个用户卡片样式 - 移除宽度设置，Grid 会处理 */
-.user-card {
-  /* width: calc(33.333% - 14px); */ /* <<< 移除：不再需要手动计算宽度 */
-  min-width: 280px; /* <<< 可选：保留最小宽度，防止列过窄时内容压缩 */
-  display: flex;
-  flex-direction: column;
-  transition: all 0.3s ease;
-  background-color: #fff;
-  border-radius: 4px;
-  border: 1px solid #EBEEF5;
-  box-sizing: border-box; /* <<< 建议添加：确保 padding 和 border 包含在尺寸内 */
-}
-
-/* 响应式调整 - 修改 Grid 列数 */
-@media (max-width: 992px) {
-  .card-list-wrapper {
-    grid-template-columns: repeat(2, 1fr); /* <<< 修改：中等屏幕两列 */
-  }
-  .search-input { width: 240px; }
-}
-
-@media (max-width: 768px) {
-  /* 移动端操作栏优化 */
-  .actions-bar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .action-item {
-    width: 100%;
-    margin-right: 0;
-  }
-  .search-input, .filter-select, .sort-select, .order-select {
-    width: 100%;
-  }
-  /* .card-list-wrapper {
-     grid-template-columns: repeat(1, 1fr); // 移动端可以考虑单列，但下面600px已经处理
-  } */
-}
-
-@media (max-width: 600px) {
-  .card-list-wrapper {
-    grid-template-columns: repeat(1, 1fr); /* <<< 修改：小屏幕单列 */
-  }
-  .user-card {
-    min-width: unset; /* 小屏幕时移除最小宽度限制 */
-  }
-}
-
-.user-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 6px 18px rgba(0,0,0,0.1);
-}
-
-/* 卡片头部 */
-.card-header {
-  display: flex;
-  align-items: center;
-  position: relative;
-  border-bottom: 1px solid #EBEEF5;
-  padding-bottom: 15px;
-}
-.card-avatar {
-  margin-right: 15px;
-  flex-shrink: 0;
-}
-.user-info-header {
-  display: flex;
-  flex-direction: column;
-  flex-grow: 1;
-  overflow: hidden;
-}
-.user-realname {
-  font-weight: 600;
-  font-size: 1.1em;
-  color: #303133;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 2px;
-}
-.user-username {
-  font-size: 0.9em;
-  color: #909399;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.status-tag {
-  position: absolute;
-  top: 18px;
-  right: 20px;
-}
-
-/* 卡片主体内容 */
-.card-body {
-  padding: 15px 20px;
-}
-.card-body p {
-  margin: 10px 0;
-  font-size: 14px;
-  color: #606266;
-  display: flex;
-  align-items: center;
-  line-height: 1.5;
-}
-.card-body p i {
-  margin-right: 10px;
-  color: #C0C4CC;
-  width: 16px;
-  text-align: center;
-  font-size: 16px;
-}
-.card-body p strong {
-  color: #303133;
-  margin-right: 5px;
-}
+.user-cards-container { padding-bottom: 40px; }
+.card-list-wrapper { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; position: relative; }
+.user-card { min-width: 280px; display: flex; flex-direction: column; transition: all 0.3s ease; background-color: #fff; border-radius: 4px; border: 1px solid #EBEEF5; box-sizing: border-box; }
+@media (max-width: 768px) { .actions-bar { flex-direction: column; align-items: stretch; } .action-item { width: 100%; margin-right: 0; } .search-input, .filter-select, .sort-select, .order-select { width: 100%; } }
+.user-card:hover { transform: translateY(-5px); box-shadow: 0 6px 18px rgba(0,0,0,0.1); }
+.card-header { display: flex; align-items: center; position: relative; border-bottom: 1px solid #EBEEF5; padding-bottom: 15px; }
+.card-avatar { margin-right: 15px; flex-shrink: 0; }
+.user-info-header { display: flex; flex-direction: column; flex-grow: 1; overflow: hidden; min-width: 0; }
+.user-realname { font-weight: 600; font-size: 1.1em; color: #303133; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+.user-username { font-size: 0.9em; color: #909399; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-tag { position: absolute; top: 18px; right: 20px; }
+.card-body { padding: 15px 20px; }
+.card-body p { margin: 10px 0; font-size: 14px; color: #606266; display: flex; align-items: center; line-height: 1.5; word-break: break-all; }
+.card-body p i { margin-right: 10px; color: #C0C4CC; width: 16px; text-align: center; font-size: 16px; flex-shrink: 0; }
+.card-body p strong { color: #303133; margin-right: 5px; flex-shrink: 0; }
 .ban-info { color: #E6A23C; }
 .ban-info i, .ban-info strong { color: #E6A23C; }
-
-/* 卡片底部操作按钮 */
-.card-actions {
-  margin-top: auto;
-  padding: 15px 20px;
-  border-top: 1px solid #EBEEF5;
-  text-align: center;
-  background-color: #fdfdfd;
-}
-
-/* 加载和无数据提示 */
-.loading-indicator,
-.no-more-indicator,
-.no-data-indicator {
-  text-align: center;
-  padding: 25px 0;
-  color: #909399;
-  width: 100%;
-  font-size: 14px;
-  /* Grid 布局下，这些提示需要跨越所有列才能居中显示 */
-  grid-column: 1 / -1; /* <<< 新增：让提示元素横跨整个Grid */
-}
+.card-actions { margin-top: auto; padding: 15px 20px; border-top: 1px solid #EBEEF5; text-align: center; background-color: #fdfdfd; }
+.loading-indicator, .no-more-indicator, .no-data-indicator { text-align: center; padding: 25px 0; color: #909399; width: 100%; font-size: 14px; grid-column: 1 / -1; }
 .loading-indicator i { margin-right: 8px; }
-
-/* 卡片进入动画 */
-.card-fade-enter-active, .card-fade-leave-active {
-  transition: all 0.5s ease;
-}
-.card-fade-enter, .card-fade-leave-to {
-  opacity: 0;
-  transform: translateY(30px) scale(0.98);
-}
-/* 对于 Grid 布局，离开动画的 position:absolute 可能仍然需要，
-   但宽度设置不再需要，Grid 会处理它 */
-.card-fade-leave-active {
-  position: absolute;
-  /* width: calc(33.333% - 14px); */ /* <<< 移除或注释掉 */
-  /* 响应式宽度调整也不再需要 */
-  /* @media (max-width: 992px) { width: calc(50% - 10px); } */
-  /* @media (max-width: 600px) { width: 100%; } */
-  z-index: 0; /* 避免覆盖其他元素 */
-}
-
-/* 确保 transition-group 内部的元素在离开时不会破坏 Grid 布局 */
-.card-list-wrapper > .user-card {
-  transition: transform 0.5s ease, opacity 0.5s ease; /* 应用于Grid项目本身的过渡 */
-}
-
+.card-fade-enter-active, .card-fade-leave-active { transition: all 0.5s ease; }
+.card-fade-enter, .card-fade-leave-to { opacity: 0; transform: translateY(20px) scale(0.95); }
+.card-fade-leave-active { position: absolute; width: calc(100% / 3 - 20px * 2 / 3); z-index: 0; }
+.card-list-wrapper > .user-card { transition: transform 0.5s ease, opacity 0.5s ease; }
 </style>
