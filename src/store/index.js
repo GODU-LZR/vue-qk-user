@@ -52,18 +52,16 @@ export default new Vuex.Store({
       console.log(`[Vuex Mutation SET_USERS] Received ${usersArray.length} users to store/update.`);
       usersArray.forEach(user => {
         // 对每个用户对象进行基本校验，确保有 ID
-        if (user && user.id != null) {
+        if (user && user.id != null) { // user.id 可以是数字或字符串，只要非 null/undefined
           // 使用 Vue.set 来确保响应性，特别是对于新添加到 usersById 的 key。
-          // 在 Vue 2 中这是推荐做法。Vue 3 中直接赋值通常也能保证响应性。
-          // 为兼容性考虑，这里使用 Vue.set。
+          // 在 Vue 2 中这是推荐做法。
           Vue.set(state.usersById, user.id, user);
-          // 或者直接赋值: state.usersById[user.id] = user;
         } else {
           // 打印警告信息，跳过无效的用户数据
           console.warn('[Vuex Mutation SET_USERS] Skipping invalid user object (missing or null id):', user);
         }
       });
-      // console.log('[Vuex Mutation SET_USERS] Current usersById state:', state.usersById); // 调试用，可以按需开启
+      // console.log('[Vuex Mutation SET_USERS] Current usersById state after update:', JSON.parse(JSON.stringify(state.usersById))); // 调试用，深拷贝以避免直接打印代理对象
     },
 
     /**
@@ -77,47 +75,70 @@ export default new Vuex.Store({
     },
 
     /**
-     * (可选) 删除指定 ID 的用户。
+     * 删除指定 ID 的用户。
      * 如果用户在列表页被删除，可以调用此 mutation 从 Vuex 中移除。
      * @param {object} state - 当前 Vuex state。
      * @param {number|string} userId - 要删除的用户 ID。
      */
     REMOVE_USER(state, userId) {
-      const numericId = parseInt(userId, 10);
+      const numericId = parseInt(userId, 10); // 尝试转换为数字，以匹配通常的 ID 格式
       if (isNaN(numericId)) {
-        console.warn(`[Vuex Mutation REMOVE_USER] Invalid ID received: ${userId}.`);
+        // 如果转换失败，尝试使用原始 userId (可能ID本身就是非数字字符串)
+        // 但通常情况下，如果 usersById 的键是数字，这里也应该是数字
+        // 为保持一致性，我们主要依赖 numericId，或确保 user.id 存储时和查询时类型一致
+        console.warn(`[Vuex Mutation REMOVE_USER] Invalid or non-numeric ID received after parsing: ${userId}. Attempting direct key if different.`);
+        // 如果 usersById 中的键可能不是严格的数字转换后的字符串，这里的逻辑可能需要调整
+        // 但基于 SET_USERS 中 user.id 可以是数字，Vue.set(obj, key, val) 中数字键会转为字符串键
+        // 所以 parseInt 后的 numericId 作为键是合理的。
+        // 如果原始 userId 就是预期的键类型且不能转为数字，则可以直接用 userId。
+        // 不过，鉴于 getUserById 也用了 parseInt，这里保持一致是好的。
+        if (state.usersById.hasOwnProperty(userId)) { // 直接检查原始ID
+          console.log(`[Vuex Mutation REMOVE_USER] Removing user with original ID key: ${userId}`);
+          Vue.delete(state.usersById, userId); // 使用 Vue.delete 保证响应性
+        } else {
+          console.log(`[Vuex Mutation REMOVE_USER] User with original ID ${userId} not found, and numeric ID was NaN.`);
+        }
         return;
       }
-      if (state.usersById[numericId]) {
+
+      if (state.usersById.hasOwnProperty(numericId)) { // 检查数字ID转换后的键是否存在
         console.log(`[Vuex Mutation REMOVE_USER] Removing user with ID: ${numericId}`);
         Vue.delete(state.usersById, numericId); // 使用 Vue.delete 保证响应性
       } else {
-        console.log(`[Vuex Mutation REMOVE_USER] User with ID ${numericId} not found in store.`);
+        console.log(`[Vuex Mutation REMOVE_USER] User with numeric ID ${numericId} (from original ${userId}) not found in store.`);
       }
     }
   },
   actions: {
-    // 暂时将 API 调用放在组件中，如果后续逻辑变复杂或需要在多处获取用户列表，
-    // 可以考虑将 getNormalUserList 的调用封装到 action 中，例如：
+    // 你们在组件中直接调用 API 并 commit mutation，这对于当前场景是可行的。
+    // 如果未来 API 调用逻辑变得复杂或需要在多个地方复用获取用户列表的逻辑，
+    // 可以考虑将 getNormalUserList 的调用封装到 action 中，如此处注释的示例：
     /*
     async fetchUsersAction({ commit }, queryParams) {
       try {
-        const response = await getNormalUserList(queryParams); // 假设 API 函数已导入
-        const responseData = response?.data ?? {};
+        // 假设 getNormalUserList API 函数已在此文件或相关API模块中导入
+        // import { getNormalUserList } from '@/api/admin';
+        const response = await getNormalUserList(queryParams);
+        const responseData = response?.data ?? {}; // 根据实际API响应结构调整
         const pageData = responseData.records || [];
         if (pageData.length > 0) {
           commit('SET_USERS', pageData);
         }
-        return responseData; // 可以返回数据给调用方
+        return responseData; // 可以返回数据给调用方，例如总数等
       } catch (error) {
-        console.error('[Vuex Action fetchUsersAction] Failed:', error);
-        throw error; // 抛出错误让调用方处理
+        console.error('[Vuex Action fetchUsersAction] Failed to fetch users:', error);
+        throw error; // 抛出错误让组件捕获并处理用户提示
       }
     }
     */
   },
   modules: {
-    // 如果应用变得庞大，可以考虑将用户管理相关的 state, getters, mutations, actions
-    // 组织到一个独立的 Vuex Module 中，例如 `userModule`。
+    // 如果应用规模持续扩大，可以考虑将用户管理相关的 state, getters, mutations, actions
+    // 组织到一个独立的 Vuex Module 中 (例如 userModule.js)，然后在主 store 文件中注册。
+    // 例如:
+    // import userModule from './modules/userModule';
+    // modules: {
+    //   user: userModule
+    // }
   }
 })

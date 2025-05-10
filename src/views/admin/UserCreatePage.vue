@@ -1,36 +1,20 @@
 <template>
   <div class="user-create-page">
-    <!-- 1. 美化后的标题 -->
     <div class="page-title-container">
       <i class="el-icon-plus page-title-icon"></i>
       <h2 class="page-title">添加新用户</h2>
     </div>
 
-    <!-- 2. 使用 el-card 包装表单 -->
     <el-card shadow="hover" class="create-card">
       <el-form :model="userForm" :rules="rules" ref="userForm" label-width="100px" class="user-form">
         <el-row :gutter="30">
-          <!-- 左侧：头像 -->
           <el-col :xs="24" :sm="10" :md="8" class="avatar-section">
-            <el-form-item label="" prop="avatar" label-width="0">
+            <el-form-item label="" label-width="0">
               <div class="avatar-display-area">
-                <!-- 使用 computed property 'displayAvatar' -->
-                <el-avatar :size="120" :src="displayAvatar" class="form-avatar">
-                  <!-- Fallback if displayAvatar is also empty/fails -->
+                <el-avatar :size="120" :src="defaultAvatar" class="form-avatar">
                   <i class="el-icon-user-solid"></i>
                 </el-avatar>
-                <el-upload
-                    class="avatar-uploader"
-                    action="#"
-                    :show-file-list="false"
-                    :http-request="handleFakeUpload"
-                    :before-upload="beforeAvatarUpload"
-                    title="点击上传头像"
-                >
-                  <i class="el-icon-camera-solid uploader-icon"></i>
-                </el-upload>
               </div>
-              <div class="el-upload__tip">可选，不上传将根据用户名生成。支持 JPG/PNG, &lt; 2MB</div>
             </el-form-item>
             <el-form-item label="用户编号" class="readonly-item">
               <el-input value="系统自动分配" disabled>
@@ -39,10 +23,9 @@
             </el-form-item>
           </el-col>
 
-          <!-- 右侧：用户信息 -->
           <el-col :xs="24" :sm="14" :md="16">
             <el-form-item label="用户名" prop="username">
-              <el-input v-model="userForm.username" placeholder="用于登录系统，将影响默认头像" clearable @input="handleUsernameInput">
+              <el-input v-model="userForm.username" placeholder="用于登录系统" clearable>
                 <i slot="prefix" class="el-input__icon el-icon-user"></i>
               </el-input>
             </el-form-item>
@@ -75,7 +58,6 @@
           </el-col>
         </el-row>
 
-        <!-- 表单操作按钮 -->
         <el-form-item class="form-actions">
           <el-button type="primary" icon="el-icon-check" @click="submitForm('userForm')" :loading="submitting">
             立即创建
@@ -93,26 +75,21 @@
 </template>
 
 <script>
-// 辅助函数：生成基于用户名的头像 URL (使用 DiceBear initials)
-function generateAvatar(seed) {
-  // 提供一个默认种子，以防输入为空时也能生成一个头像
-  const safeSeed = seed || 'NewUser';
-  const size = 120; // 头像尺寸
-  const encodedSeed = encodeURIComponent(safeSeed);
-  return `https://api.dicebear.com/7.x/initials/svg?seed=${encodedSeed}&size=${size}&backgroundColor=409eff,67c23a,e6a23c,f56c6c&backgroundType=gradientLinear&radius=50`;
-}
+// 导入默认头像路径
+import defaultAvatarStaticPath from '@/assets/default-avatar.png';
+// 导入 API 函数
+import { adminCreateUser } from '@/api/admin/index.js'; // 请确认您的 API 文件路径
 
 export default {
   name: 'UserCreatePage',
   data() {
     // --- 密码验证逻辑 (保持不变) ---
     const validatePass = (rule, value, callback) => {
-      if (!value) { // 必填
+      if (!value) {
         callback(new Error('请输入密码'));
       } else if (value.length < 6) {
         callback(new Error('密码长度不能少于 6 位'));
       } else {
-        // 如果确认密码有值，触发确认密码的校验
         if (this.userForm.confirmPassword) {
           this.$refs.userForm.validateField('confirmPassword');
         }
@@ -120,7 +97,7 @@ export default {
       }
     };
     const validatePass2 = (rule, value, callback) => {
-      if (!value) { // 必填
+      if (!value) {
         callback(new Error('请再次输入密码'));
       } else if (value !== this.userForm.password) {
         callback(new Error('两次输入的新密码不一致!'));
@@ -131,19 +108,17 @@ export default {
 
     return {
       submitting: false,
+      defaultAvatar: defaultAvatarStaticPath, // 将导入的默认头像路径存入data
       userForm: { // 表单绑定对象
         username: '',
         realName: '',
         email: '',
         password: '',
         confirmPassword: '',
-        avatarPreview: null, // 存储上传头像的预览 DataURL
-        avatarFile: null, // 存储待上传的文件对象
+        avatar: defaultAvatarStaticPath, // 头像字段，固定为默认头像路径
+        // status 字段将在提交时固定为0，不在表单中绑定
       },
-      // 标志位，表示用户是否已选择上传头像
-      // 用于决定 displayAvatar 是显示上传预览还是生成的头像
-      avatarUploadedByUser: false,
-      rules: { // 验证规则
+      rules: { // 验证规则 (根据您的图片，除了验证码都是必填)
         username: [
           { required: true, message: '请输入用户名', trigger: 'blur' },
           { min: 3, max: 20, message: '长度在 3 到 20 个字符', trigger: 'blur' }
@@ -157,70 +132,51 @@ export default {
         ],
         password: [
           { required: true, validator: validatePass, trigger: 'blur' }
-          // 长度校验已包含在 validatePass 中
         ],
         confirmPassword: [
           { required: true, validator: validatePass2, trigger: 'blur' }
         ]
-        // avatar 字段不需要表单验证规则，由 beforeUpload 控制
       }
     };
   },
-  computed: {
-    // --- 计算属性：用于显示头像 ---
-    displayAvatar() {
-      // 如果用户已经上传了头像，优先显示预览图
-      if (this.avatarUploadedByUser && this.userForm.avatarPreview) {
-        return this.userForm.avatarPreview;
-      }
-      // 否则，根据用户名生成头像 (即使为空也会生成默认的)
-      return generateAvatar(this.userForm.username);
-    }
-  },
+  // computed 中不再需要 displayAvatar，可以直接在 template 中使用 this.defaultAvatar
+  // 或者将 el-avatar 的 :src 直接绑定到 this.userForm.avatar
   methods: {
-    handleUsernameInput() {
-      // 当用户名输入变化时，如果用户没有主动上传头像，
-      // displayAvatar 会自动重新计算并更新（因为依赖于 userForm.username）
-      // 这里不需要额外做什么，除非你想在输入时强制清除已上传的头像预览
-      // if (this.avatarUploadedByUser) {
-      //   // 可选：如果希望用户名改变时重置上传的头像
-      //   this.userForm.avatarPreview = null;
-      //   this.userForm.avatarFile = null;
-      //   this.avatarUploadedByUser = false;
-      // }
-    },
+    // handleUsernameInput 不再需要处理头像逻辑，可以移除 (如果仅用于头像)
+    // 如果还有其他用途则保留
 
     submitForm(formName) {
-      this.$refs[formName].validate((valid) => {
+      this.$refs[formName].validate(async (valid) => { // 将回调改为 async
         if (valid) {
           this.submitting = true;
           console.log('创建表单验证通过，准备提交:', this.userForm);
 
-          // --- 准备提交的数据 ---
-          const formDataToSubmit = new FormData();
-          formDataToSubmit.append('username', this.userForm.username);
-          formDataToSubmit.append('realName', this.userForm.realName);
-          formDataToSubmit.append('email', this.userForm.email);
-          formDataToSubmit.append('password', this.userForm.password); // 密码是必填的
+          // --- 准备提交给 API 的数据 ---
+          const userData = {
+            username: this.userForm.username,
+            realName: this.userForm.realName,
+            email: this.userForm.email,
+            password: this.userForm.password,
+            avatar: this.userForm.avatar, // 发送默认头像路径
+            status: 0 // 状态固定为0
+          };
 
-          // 如果用户上传了头像文件，则添加
-          if (this.userForm.avatarFile) {
-            formDataToSubmit.append('avatarFile', this.userForm.avatarFile, this.userForm.avatarFile.name);
-          }
-          // 注意：如果用户没上传，后端可以根据情况决定是否需要根据用户名生成并保存头像
-
-          console.log('模拟提交的数据 (FormData):');
-          for (let pair of formDataToSubmit.entries()) {
-            console.log(pair[0]+ ': ' + (pair[1] instanceof File ? pair[1].name : pair[1]));
-          }
-
-          // --- 模拟 API 请求 ---
-          setTimeout(() => {
+          try {
+            // 调用实际的 API 函数
+            const createdUser = await adminCreateUser(userData); // 使用 await 等待结果
+            console.log('API调用成功，返回的用户信息:', createdUser); // createdUser 应该是 UserProfileDTO
             this.$message.success('新用户创建成功！');
-            this.submitting = false;
             // 创建成功后跳转回列表页
-            this.$router.push('/admin/users');
-          }, 1000);
+            this.$router.push('/admin/users'); // 假设列表页路由为 /admin/users
+          } catch (error) {
+            console.error('创建用户失败 (API 调用出错):', error);
+            // API 函数中如果 reject 了 Error 对象，error.message 可以获取错误信息
+            // 如果是 Axios 错误，可能在 error.response.data.message 中
+            const errMsg = error?.response?.data?.message || error?.message || '创建用户失败，请稍后重试。';
+            this.$message.error(errMsg);
+          } finally {
+            this.submitting = false;
+          }
 
         } else {
           console.log('创建表单验证失败!');
@@ -231,14 +187,12 @@ export default {
     },
 
     resetForm(formName) {
-      // 重置 Element UI 表单项到初始值
       this.$refs[formName].resetFields();
-      // 手动清除头像预览和文件对象，并重置上传标志
-      this.userForm.avatarPreview = null;
-      this.userForm.avatarFile = null;
-      this.avatarUploadedByUser = false;
+      // userForm.avatar 会因为 resetFields() 被重置 (如果 avatar 是 form item)
+      // 如果不是，需要确保它仍然是 defaultAvatarStaticPath，但由于它在 data 中初始化且不通过表单改变，所以通常没问题
+      // 这里确保一下
+      this.userForm.avatar = defaultAvatarStaticPath;
 
-      // 清除可能残留的验证错误提示
       this.$nextTick(() => {
         this.$refs.userForm.clearValidate();
       });
@@ -246,50 +200,11 @@ export default {
     },
 
     goBack() {
-      // 可以考虑添加一个确认对话框，如果表单已填写
-      // if (this.userForm.username || ...) { ... }
-      this.$router.push('/admin/users'); // 明确返回列表页
+      this.$router.push('/admin/users');
     },
 
-    // --- 头像上传处理 ---
-    handleFakeUpload(options) {
-      const file = options.file;
-      // 使用 FileReader 在前端预览
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        // 更新 avatarPreview 以立即显示预览
-        this.userForm.avatarPreview = e.target.result; // 这是 DataURL
-        this.avatarUploadedByUser = true; // 标记用户已上传
-      };
-      reader.readAsDataURL(file);
-      // 保存文件对象，用于提交
-      this.userForm.avatarFile = file;
-      console.log('New avatar selected:', file.name);
-      // 不需要提示，预览会自动更新
-    },
-
-    beforeAvatarUpload(file) {
-      const isJPG = file.type === 'image/jpeg';
-      const isPNG = file.type === 'image/png';
-      const isLt2M = file.size / 1024 / 1024 < 2;
-
-      if (!isJPG && !isPNG) {
-        this.$message.error('上传头像图片只能是 JPG 或 PNG 格式!');
-      }
-      if (!isLt2M) {
-        this.$message.error('上传头像图片大小不能超过 2MB!');
-      }
-      // 只有在验证通过时才允许 handleFakeUpload 执行
-      if ((isJPG || isPNG) && isLt2M) {
-        return true;
-      } else {
-        // 验证失败时，清除可能已设置的文件和预览，防止显示错误预览
-        this.userForm.avatarPreview = null;
-        this.userForm.avatarFile = null;
-        this.avatarUploadedByUser = false;
-        return false;
-      }
-    }
+    // --- 头像上传相关方法已移除 ---
+    // handleFakeUpload, beforeAvatarUpload
   }
 }
 </script>
@@ -359,41 +274,16 @@ export default {
   box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 .form-avatar .el-icon-user-solid {
-  font-size: 60px;
+  font-size: 60px; /* 如果默认头像加载失败，显示icon */
 }
 
-.avatar-uploader {
-  position: absolute;
-  bottom: 5px;
-  right: 5px;
-  width: 32px;
-  height: 32px;
-  line-height: 32px;
-  background-color: rgba(0, 0, 0, 0.5);
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color 0.3s;
-}
-.avatar-uploader:hover {
-  background-color: rgba(0, 0, 0, 0.7);
-}
-.uploader-icon {
-  color: #fff;
-  font-size: 18px;
-}
+/* 移除了 .avatar-uploader 相关的样式，因为上传组件已删除 */
 
-.avatar-uploader .el-upload {
-  display: none; /* 隐藏默认触发器 */
-}
-
-.el-upload__tip {
-  font-size: 12px;
+.el-upload__tip { /* 这个也可以删掉，因为上传提示没了 */
+  /* font-size: 12px;
   color: #999;
   line-height: 1.4;
-  margin-top: 8px;
+  margin-top: 8px; */
 }
 
 /* 只读表单项 */

@@ -124,9 +124,14 @@
 
 <script>
 import defaultAvatarPlaceholder from '@/assets/default-avatar.png';
-import { getNormalUserList } from '@/api/admin/index.js';
-// 引入 mapMutations (如果你想用辅助函数的话，但直接用 this.$store.commit 更直观)
-// import { mapMutations } from 'vuex';
+// 导入 API 函数
+import {
+  getNormalUserList,
+  banUserByAdmin,
+  unbanUserByAdmin,
+  deleteUserByAdmin
+} from '@/api/admin/index.js';
+// import { mapMutations } from 'vuex'; // 如果使用 mapMutations
 
 export default {
   name: 'UserManagementPage',
@@ -136,9 +141,9 @@ export default {
       loadingMore: false,
       noMoreData: false,
       searchQuery: '',
-      users: [], // 本地列表数据，用于页面显示
+      users: [],
       defaultAvatar: defaultAvatarPlaceholder,
-      currentPage: 0, // 记录当前已加载的页码 (从1开始计数比较好，API通常也是)
+      currentPage: 0,
       pageSize: 12,
       totalUsers: 0,
       filterStatus: '',
@@ -153,34 +158,23 @@ export default {
     };
   },
   created() {
-    // 首次加载时，请求第 1 页
     this.fetchUsers(true, 1);
   },
   methods: {
-    // ...mapMutations(['SET_USERS', 'REMOVE_USER']), // 如果使用 mapMutations
+    // ...mapMutations(['SET_USERS', 'REMOVE_USER']),
 
-    /**
-     * 获取用户列表数据
-     * @param {boolean} isInitialOrSearch - 是否是首次加载或搜索/筛选/排序触发的加载
-     * @param {number} pageToFetch - 需要请求的页码 (从 1 开始)
-     */
     fetchUsers(isInitialOrSearch = false, pageToFetch) {
-      // --- 加载状态判断逻辑 ---
       if (isInitialOrSearch) {
-        // 初始加载或搜索/筛选/排序
-        if (this.loading) return; // 防止重复请求
+        if (this.loading) return;
         console.log(`[fetchUsers] Initial load/search requested for page ${pageToFetch}`);
         this.loading = true;
-        this.users = []; // 清空本地列表
-        this.currentPage = 0; // 重置当前页码记录 (因为要从第一页开始)
-        this.noMoreData = false; // 重置“没有更多”状态
-        // 滚动到顶部 (如果容器存在)
+        this.users = [];
+        this.currentPage = 0;
+        this.noMoreData = false;
         if (this.$refs.scrollContainer) {
           this.$refs.scrollContainer.scrollTop = 0;
         }
       } else {
-        // 加载更多
-        // 如果正在加载、或正在加载更多、或已确定没有更多数据，则不执行
         if (this.loading || this.loadingMore || this.noMoreData) {
           console.log(`[fetchUsers] Load more for page ${pageToFetch} skipped: loading=${this.loading}, loadingMore=${this.loadingMore}, noMoreData=${this.noMoreData}`);
           return;
@@ -189,74 +183,59 @@ export default {
         this.loadingMore = true;
       }
 
-      // --- 请求参数 ---
       const queryParams = {
-        currentPage: pageToFetch, // 使用传入的要请求的页码
+        currentPage: pageToFetch,
         pageSize: this.pageSize,
         searchQuery: this.searchQuery,
         filterStatus: this.filterStatus === '' ? null : this.filterStatus,
-        sortBy: this.sortBy === 'default' ? null : this.sortBy, // 'default' 时传 null 或不传
-        sortOrder: this.sortBy === 'default' ? null : this.sortOrder // 'default' 时传 null 或不传
+        sortBy: this.sortBy === 'default' ? null : this.sortBy,
+        sortOrder: this.sortBy === 'default' ? null : this.sortOrder
       };
 
       console.log(`[Vue Component] 调用 getNormalUserList - 请求页码: ${pageToFetch}, 参数:`, queryParams);
 
-      // --- 调用 API ---
       getNormalUserList(queryParams)
           .then(response => {
             const responseData = response?.data ?? {};
-            const pageData = responseData.records || []; // 用户数据数组
-            const total = responseData.total || 0; // 总记录数
+            const pageData = responseData.records || [];
+            const total = responseData.total || 0;
 
             console.log(`[Vue Component] API 响应成功: 获取到页码 ${pageToFetch} 的 ${pageData.length} 条记录, 总数 ${total}`);
 
-            // --- ⭐ 将获取到的数据存入 Vuex ---
             if (pageData.length > 0) {
               try {
                 this.$store.commit('SET_USERS', pageData);
                 console.log(`[Vue Component] 已将 ${pageData.length} 条用户数据提交到 Vuex store。`);
               } catch (e) {
                 console.error("[Vue Component] 提交用户数据到 Vuex 失败:", e);
-                // 考虑添加用户提示
-                // this.$message.error('缓存用户信息失败');
               }
             }
-            // --- ⭐ Vuex 存储结束 ---
 
-            // --- 更新本地列表数据用于显示 ---
             if (pageData.length > 0) {
               if (isInitialOrSearch) {
-                this.users = pageData; // 初始加载或搜索，直接替换
+                this.users = pageData;
               } else {
-                this.users = this.users.concat(pageData); // 加载更多，追加数据
+                this.users = this.users.concat(pageData);
               }
-              this.currentPage = pageToFetch; // 更新当前已成功加载的页码
+              this.currentPage = pageToFetch;
               console.log(`[fetchUsers SUCCESS] currentPage updated to: ${this.currentPage}`);
             }
 
-            // --- 更新总数和“没有更多”状态 ---
             this.totalUsers = total;
-            // 判断是否没有更多数据：当前列表长度 >= 总数，或者当前请求返回的数据为空
             this.noMoreData = this.users.length >= this.totalUsers || pageData.length === 0;
-            // 如果是初始加载且第一页就没数据，也标记为 noMoreData
             if (isInitialOrSearch && pageData.length === 0) {
               this.noMoreData = true;
             }
 
-
             console.log(`[Vue Component] 加载完成: 当前显示 ${this.users.length}, 总数 ${this.totalUsers}, 是否还有更多: ${!this.noMoreData}`);
-
           })
           .catch(error => {
-            // --- 错误处理 ---
             console.error('[Vue Component] 获取用户列表失败:', error);
-            const errorMsg = error?.message || '请稍后重试';
+            const errorMsg = error?.response?.data?.message || error?.message || '请稍后重试';
             this.$message.error(`加载用户列表失败: ${errorMsg}`);
-            // 出错时也认为没有更多数据，防止无限滚动一直尝试
             this.noMoreData = true;
           })
           .finally(() => {
-            // --- 结束加载状态 ---
             if (isInitialOrSearch) {
               this.loading = false;
             } else {
@@ -266,48 +245,39 @@ export default {
           });
     },
 
-    // --- 无限滚动加载更多 ---
     loadMore() {
       console.log(`触发 loadMore, 当前已加载页: ${this.currentPage}, 是否还有更多: ${!this.noMoreData}, loadingMore: ${this.loadingMore}`);
-      // 只有在非加载中、非加载更多、且还有更多数据时才加载下一页
       if (!this.loading && !this.loadingMore && !this.noMoreData) {
-        const nextPage = this.currentPage + 1; // 计算下一页页码
+        const nextPage = this.currentPage + 1;
         console.log(`[loadMore] 准备加载第 ${nextPage} 页`);
-        this.fetchUsers(false, nextPage); // 调用 fetchUsers 加载下一页
+        this.fetchUsers(false, nextPage);
       } else {
         console.log(`[loadMore] 加载被阻止: loading=${this.loading}, loadingMore=${this.loadingMore}, noMoreData=${this.noMoreData}`);
       }
     },
 
-    // --- 搜索、筛选、排序处理 ---
     handleSearch() {
-      // 搜索时，总是从第 1 页开始重新加载
       this.fetchUsers(true, 1);
     },
     handleFilterOrSortChange() {
-      // 筛选或排序改变时，也总是从第 1 页开始重新加载
       this.fetchUsers(true, 1);
     },
 
-    // --- 添加用户导航 ---
     handleAddUser() {
       this.$router.push('/admin/users/create');
     },
-    // --- 编辑用户导航 ---
     handleEditUser(user) {
-      // 可以在导航前检查 Vuex 中是否已存在该用户 (可选调试)
       const userInStore = this.$store.getters.getUserById(user.id);
       console.log(`[UserManagementPage] Navigating to edit user ${user.id}. Exists in Vuex: ${!!userInStore}`);
       this.$router.push(`/admin/users/edit/${user.id}`);
     },
 
-    // --- 用户操作指令处理 ---
     handleCommand(command, user) {
       console.log('Command:', command, 'User:', user);
       const actionMap = {
         'ban_15': { message: `确认要将用户 "${user.realName}" 封禁15天吗？`, action: () => this.banUser(user, 15) },
         'ban_30': { message: `确认要将用户 "${user.realName}" 封禁30天吗？`, action: () => this.banUser(user, 30) },
-        'ban_permanent': { message: `确认要将用户 "${user.realName}" 永久封禁吗？此操作影响重大！`, action: () => this.banUser(user, -1) },
+        'ban_permanent': { message: `确认要将用户 "${user.realName}" 永久封禁吗？此操作影响重大！`, action: () => this.banUser(user, -1) }, // -1 代表永久封禁
         'unban': { message: `确认要取消用户 "${user.realName}" 的封禁状态吗？`, action: () => this.unbanUser(user) },
         'delete': { message: `确认要删除用户 "${user.realName}" 吗？此操作不可恢复！`, action: () => this.deleteUser(user), type: 'error' }
       };
@@ -317,49 +287,79 @@ export default {
       }
     },
 
-    // --- 用户操作方法 (模拟 API 调用) ---
     banUser(user, durationDays) {
-      console.log(`请求封禁用户 ${user.id}，时长: ${durationDays === -1 ? '永久' : durationDays + '天'}`);
-      this.$message({ message: '处理中...', type: 'info', duration: 1000 });
-      // TODO: 调用后端封禁 API
-      setTimeout(() => {
-        this.$message.success('用户封禁操作成功 (模拟)');
-        // 操作成功后刷新列表 (会重新获取并覆盖 Vuex 中的数据)
-        this.fetchUsers(true, 1);
-        // 如果需要立即更新 Vuex 中该用户的状态，可以在这里 commit
-        // const newStatus = durationDays === -1 ? 3 : (durationDays === 30 ? 2 : 1);
-        // const newBanEndTime = ... // 计算封禁结束时间
-        // this.$store.commit('SET_USERS', [{...user, status: newStatus, banEndTime: newBanEndTime}]);
-      }, 500);
-    },
-    unbanUser(user) {
-      console.log(`请求取消封禁用户 ${user.id}`);
-      this.$message({ message: '处理中...', type: 'info', duration: 1000 });
-      // TODO: 调用后端解封 API
-      setTimeout(() => {
-        this.$message.success('用户已取消封禁 (模拟)');
-        this.fetchUsers(true, 1);
-        // this.$store.commit('SET_USERS', [{...user, status: 0, banEndTime: null}]);
-      }, 500);
-    },
-    deleteUser(user) {
-      console.log(`请求删除用户 ${user.id}`);
-      this.$message({ message: '处理中...', type: 'info', duration: 1000 });
-      // TODO: 调用后端删除 API
-      setTimeout(() => {
-        this.$message.success('用户删除成功 (模拟)');
-        // 删除成功后，不仅要刷新列表，最好也从 Vuex 中移除
-        try {
-          this.$store.commit('REMOVE_USER', user.id); // 调用移除 mutation
-          console.log(`[Vue Component] 已从 Vuex store 移除用户 ${user.id}`);
-        } catch(e) {
-          console.error("[Vue Component] 从 Vuex 移除用户失败:", e);
-        }
-        this.fetchUsers(true, 1); // 刷新列表
-      }, 500);
+      let banStatus;
+      let durationText;
+      if (durationDays === 15) {
+        banStatus = 1;
+        durationText = '15天';
+      } else if (durationDays === 30) {
+        banStatus = 2;
+        durationText = '30天';
+      } else if (durationDays === -1) { // 永久封禁
+        banStatus = 3;
+        durationText = '永久';
+      } else {
+        this.$message.error('无效的封禁时长');
+        return;
+      }
+
+      console.log(`请求封禁用户 ${user.id}，时长: ${durationText}，对应 banStatus: ${banStatus}`);
+      this.$message({ message: '处理中...', type: 'info', duration: 1500 });
+
+      banUserByAdmin(user.id, { banStatus })
+          .then(() => {
+            this.$message.success(`用户 "${user.realName}" 已成功封禁${durationText}`);
+            // 操作成功后刷新列表，重新获取第一页数据
+            this.fetchUsers(true, 1);
+          })
+          .catch(error => {
+            console.error(`封禁用户 ${user.id} 失败:`, error);
+            const errorMsg = error?.response?.data?.message || error?.message || '操作失败，请重试';
+            this.$message.error(`封禁失败: ${errorMsg}`);
+          });
     },
 
-    // --- 辅助方法 ---
+    unbanUser(user) {
+      console.log(`请求取消封禁用户 ${user.id}`);
+      this.$message({ message: '处理中...', type: 'info', duration: 1500 });
+
+      unbanUserByAdmin(user.id)
+          .then(() => {
+            this.$message.success(`用户 "${user.realName}" 已成功取消封禁`);
+            this.fetchUsers(true, 1);
+          })
+          .catch(error => {
+            console.error(`取消封禁用户 ${user.id} 失败:`, error);
+            const errorMsg = error?.response?.data?.message || error?.message || '操作失败，请重试';
+            this.$message.error(`取消封禁失败: ${errorMsg}`);
+          });
+    },
+
+    deleteUser(user) {
+      console.log(`请求删除用户 ${user.id}`);
+      this.$message({ message: '处理中...', type: 'info', duration: 1500 });
+
+      deleteUserByAdmin(user.id)
+          .then(() => {
+            this.$message.success(`用户 "${user.realName}" 删除成功`);
+            try {
+              this.$store.commit('REMOVE_USER', user.id);
+              console.log(`[Vue Component] 已从 Vuex store 移除用户 ${user.id}`);
+            } catch(e) {
+              console.error("[Vue Component] 从 Vuex 移除用户失败:", e);
+            }
+            // 刷新列表，看是否需要调整页码或直接刷新当前页/第一页
+            // 考虑到删除后总数会变化，且当前页可能因此变空，刷新第一页通常更稳妥
+            this.fetchUsers(true, 1);
+          })
+          .catch(error => {
+            console.error(`删除用户 ${user.id} 失败:`, error);
+            const errorMsg = error?.response?.data?.message || error?.message || '操作失败，请重试';
+            this.$message.error(`删除用户失败: ${errorMsg}`);
+          });
+    },
+
     confirmAction(message, confirmCallback, type = 'warning') {
       this.$confirm(message, '提示', {
         confirmButtonText: '确定',
@@ -371,6 +371,7 @@ export default {
         this.$message({ type: 'info', message: '已取消操作' });
       });
     },
+
     formatStatus(status) {
       const statusMap = { 0: '正常', 1: '封禁15天', 2: '封禁30天', 3: '永久封禁' };
       return statusMap[status] !== undefined ? statusMap[status] : '未知状态';
